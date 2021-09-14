@@ -193,11 +193,12 @@ findWithExtension path  (e : es) = do
   hasFile <- doesFileExist newPath
   if hasFile then return (Just newPath) else findWithExtension path es
 
-runGentleForcedAligner :: FilePath -> FilePath -> IO ()
+-- | Run Gentle on an audio file and a transcript text file.
+runGentleForcedAligner :: FilePath -> FilePath -> IO FilePath
 runGentleForcedAligner audioFile transcriptFile = do
   ret <- rawSystem prog args
   case ret of
-    ExitSuccess -> return ()
+    ExitSuccess -> return jsonPath
     ExitFailure e ->
       error
         $  "Gentle forced aligner failed with: "
@@ -206,7 +207,8 @@ runGentleForcedAligner audioFile transcriptFile = do
         ++ "\nCommand: "
         ++ showCommandForUser prog args
  where
-  prog = "curl"
+  jsonPath = replaceExtension audioFile "json"
+  prog     = "curl"
   args =
     [ "--silent"
     , "--form"
@@ -214,7 +216,7 @@ runGentleForcedAligner audioFile transcriptFile = do
     , "--form"
     , "transcript=@" ++ transcriptFile
     , "--output"
-    , replaceExtension audioFile "json"
+    , jsonPath
     , "http://localhost:8765/transcriptions?async=false"
     ]
 
