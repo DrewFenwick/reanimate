@@ -20,13 +20,17 @@ module Reanimate.Voice
   )
 where
 
-import           Control.Monad       (forM_)
+import           Control.Applicative       (Alternative(..))
+import           Control.Monad             (guard)
+import           Control.Monad.IO.Class    (MonadIO (..))
+import           Control.Monad.Trans.Maybe (MaybeT (runMaybeT))
 import           Data.Aeson
 import           Data.Char           (isAlphaNum, isSpace)
+import           Data.Foldable (asum, forM_)
 import           Data.List           (sortOn)
 import           Data.Map            (Map)
 import qualified Data.Map            as Map
-import           Data.Maybe          (listToMaybe)
+import           Data.Maybe (fromMaybe, listToMaybe)
 import           Data.Text           (Text)
 import qualified Data.Text           as T
 import qualified Data.Text.IO        as T
@@ -122,6 +126,23 @@ findWords t (key : keys) wd =
   ]
   where badKey = error $ "Missing transcript key: " ++ show key
 
+decodeJsonFile :: FromJSON b => FilePath -> IO b
+decodeJsonFile filepath =
+  fromMaybe (error "bad json") <$> decodeFileStrict filepath
+
+loadExistingGentleTranscript
+  :: (Alternative m, MonadIO m) => FilePath -> m Transcript
+loadExistingGentleTranscript path = do
+  findFile path
+  liftIO $ decodeJsonFile path
+
+makeGentleTranscript
+  :: (MonadIO m, Alternative m) => [Char] -> Text -> m Transcript
+makeGentleTranscript path trimmedTranscript = do
+  audioPath <- findWithExtension path audioExtensions
+  liftIO $ runGentleForcedAligner audioPath trimmedTranscript >>= decodeJsonFile
+  where audioExtensions = ["mp3", "m4a", "flac"]
+
 -- | Loading a transcript does three things depending on which files are available
 --   with the same basename as the input argument:
 --   1. If a JSON file is available, it is parsed and returned.
@@ -130,32 +151,22 @@ findWords t (key : keys) wd =
 --   3. If only the text transcript is available, a fake transcript is returned,
 --      with timings roughly at 120 words per minute.
 loadTranscript :: FilePath -> Transcript
-loadTranscript path = unsafePerformIO $ do
-  rawTranscript <- T.readFile path
-  let keys           = parseTranscriptKeys rawTranscript
-      trimTranscript = cutoutKeys keys rawTranscript
-  hasJSON    <- doesFileExist jsonPath
-  transcript <- if hasJSON
-    then do
-      mbT <- decodeFileStrict jsonPath
-      case mbT of
-        Nothing -> error "bad json"
-        Just t  -> pure t
-    else do
-      hasAudio <- findWithExtension path audioExtensions
-      case hasAudio of
-        Nothing        -> return $ fakeTranscript' trimTranscript
-        Just audioPath -> withTempFile "txt" $ \txtPath -> do
-          T.writeFile txtPath trimTranscript
-          runGentleForcedAligner audioPath txtPath
-          mbT <- decodeFileStrict jsonPath
-          case mbT of
-            Nothing -> error "bad json"
-            Just t  -> pure t
+loadTranscript = unsafePerformIO . safeLoadTranscript
+{-# NOINLINE loadTranscript #-}
+
+safeLoadTranscript :: FilePath -> IO Transcript
+safeLoadTranscript path = do
+  rawTextTranscript <- T.readFile path
+  let keys           = parseTranscriptKeys rawTextTranscript
+      trimTranscript = cutoutKeys keys rawTextTranscript
+      fakeIfMissing  = fromMaybe $ fakeTranscript' trimTranscript
+      getGentleTranscript =
+        runMaybeT
+          $   loadExistingGentleTranscript jsonPath
+          <|> makeGentleTranscript path trimTranscript
+  transcript <- fakeIfMissing <$> getGentleTranscript
   pure $ transcript { transcriptKeys = finalizeKeys keys }
- where
-  jsonPath        = replaceExtension path "json"
-  audioExtensions = ["mp3", "m4a", "flac"]
+  where jsonPath = replaceExtension path "json"
 
 parseTranscriptKeys :: Text -> Map Text Int
 parseTranscriptKeys = worker Map.empty 0
@@ -186,16 +197,30 @@ cutoutKeys keys = T.concat . worker 0 (sortOn snd (Map.toList keys))
         (before, after) = T.splitAt (at - offset) txt
     in  before : worker (at + keyLen) xs (T.drop keyLen after)
 
-findWithExtension :: FilePath -> [String] -> IO (Maybe FilePath)
-findWithExtension _path []       = return Nothing
-findWithExtension path  (e : es) = do
-  let newPath = replaceExtension path e
-  hasFile <- doesFileExist newPath
-  if hasFile then return (Just newPath) else findWithExtension path es
+findWithExtension
+  :: (MonadIO f, Functor t, Foldable t, Alternative f)
+  => [Char]
+  -> t String
+  -> f FilePath
+findWithExtension _path extensions = asum fileFinders
+ where
+  fileFinders = fmap (returnFound . replaceExtension _path) extensions
+  returnFound path = path <$ findFile path
+
+-- | Fails if the file doesn't exist.
+findFile :: (Alternative m, MonadIO m) => FilePath -> m ()
+findFile path = guard =<< liftIO (doesFileExist path)
+
+-- | Run Gentle on an audio file and a `Text` transcript.
+runGentleForcedAligner :: FilePath -> Text -> IO FilePath
+runGentleForcedAligner audioFile textTranscript =
+  withTempFile "txt" $ \transcriptFile -> do
+    T.writeFile transcriptFile textTranscript
+    runGentleForcedAlignerOnFile audioFile transcriptFile
 
 -- | Run Gentle on an audio file and a transcript text file.
-runGentleForcedAligner :: FilePath -> FilePath -> IO FilePath
-runGentleForcedAligner audioFile transcriptFile = do
+runGentleForcedAlignerOnFile :: FilePath -> FilePath -> IO FilePath
+runGentleForcedAlignerOnFile audioFile transcriptFile = do
   ret <- rawSystem prog args
   case ret of
     ExitSuccess -> return jsonPath
