@@ -20,31 +20,32 @@ module Reanimate.Voice
   )
 where
 
-import           Control.Applicative       (Alternative(..))
+import           Control.Applicative       (Alternative (..))
 import           Control.Monad             (guard)
 import           Control.Monad.IO.Class    (MonadIO (..))
 import           Control.Monad.Trans.Maybe (MaybeT (runMaybeT))
 import           Data.Aeson
-import           Data.Char           (isAlphaNum, isSpace)
-import           Data.Foldable (asum, forM_)
-import           Data.List           (sortOn)
-import           Data.Map            (Map)
-import qualified Data.Map            as Map
-import           Data.Maybe (fromMaybe, listToMaybe)
-import           Data.Text           (Text)
-import qualified Data.Text           as T
-import qualified Data.Text.IO        as T
-import           Reanimate.Animation (SVG, staticFrame)
-import           Reanimate.Constants (defaultStrokeWidth, screenHeight, screenWidth)
-import           Reanimate.LaTeX     (latex, latexChunks)
-import           Reanimate.Misc      (withTempFile)
-import           Reanimate.Scene     (Scene, play, waitUntil)
-import           Reanimate.Svg       (mkGroup, scale, translate, withStrokeColor, withStrokeWidth)
-import           System.Directory    (doesFileExist)
-import           System.Exit         (ExitCode (ExitFailure, ExitSuccess))
-import           System.FilePath     (replaceExtension)
-import           System.IO.Unsafe    (unsafePerformIO)
-import           System.Process      (rawSystem, showCommandForUser)
+import           Data.Char                 (isAlphaNum, isSpace)
+import           Data.Foldable             (asum, forM_)
+import           Data.List                 (sortOn)
+import           Data.Map                  (Map)
+import qualified Data.Map                  as Map
+import           Data.Maybe                (fromMaybe, listToMaybe)
+import           Data.Text                 (Text)
+import qualified Data.Text                 as T
+import qualified Data.Text.IO              as T
+import           Reanimate.Animation       (SVG, staticFrame)
+import           Reanimate.Constants       (defaultStrokeWidth, screenHeight, screenWidth)
+import           Reanimate.LaTeX           (latex, latexChunks)
+import           Reanimate.Misc            (withTempFile)
+import           Reanimate.Scene           (Scene, play, waitUntil)
+import           Reanimate.Svg             (mkGroup, scale, translate, withStrokeColor,
+                                            withStrokeWidth)
+import           System.Directory          (doesFileExist)
+import           System.Exit               (ExitCode (ExitFailure, ExitSuccess))
+import           System.FilePath           (replaceExtension)
+import           System.IO.Unsafe          (unsafePerformIO)
+import           System.Process            (rawSystem, showCommandForUser)
 
 -- | Aligned transcript. Contains the transcript text as well as
 --   timing data for each word.
